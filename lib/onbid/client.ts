@@ -3,8 +3,9 @@
 // - 지역본부 1곳씩 받는다. 한 번의 실행 시간 한도를 넘지 않게 하기 위해서다.
 //   12곳을 모아 그 주로 확정하는 일은 저장 단계(PLAN 작업 18·20)가 맡는다.
 // - 부동산·동산·차량 세 종류를 모든 페이지 받는다. 요청 사이에는 최소 3초를 쉰다.
-// - 입찰 기간이 일주일 전 ~ 1년 뒤인 물건을 받아, "입찰준비중·입찰진행중"만 남긴다
-//   (검색 시작일을 오늘로 하면 이미 입찰이 시작된 물건이 빠지기 때문).
+// - 입찰 기간이 오늘 ~ 1년 뒤인 물건을 받아, "입찰준비중·입찰진행중"만 남긴다.
+//   사이트는 물건마다 검색 기간에 걸리는 회차 하나만 돌려주므로, 시작일을 과거로 잡으면
+//   지난 회차(입찰마감)가 대신 나와 다음 회차가 빠진다(2026-10-29 실제 수집에서 확인).
 // - 한 번이라도 실패하거나 받은 건수가 전체 건수보다 적으면 전부 버리고 실패로 돌려준다.
 // - 물건마다 5가지 항목만 남기고 나머지(주소·금액 등)는 버린다.
 
@@ -93,9 +94,12 @@ function addDays(date: string, days: number): string {
   return d.toISOString().slice(0, 10);
 }
 
-/** `"주거용건물 / 단독주택"` → `"주거용건물"` */
+/**
+ * `"주거용건물 / 단독주택"` → `"주거용건물"`.
+ * 단계 구분은 앞뒤 띄어쓰기가 있는 " / "다. "석유/화학/연료"처럼 이름 안의 "/"는 자르지 않는다.
+ */
 export function topCategory(ctgrFullNm: string | undefined): string | null {
-  const top = ctgrFullNm?.split("/")[0]?.trim();
+  const top = ctgrFullNm?.split(" / ")[0]?.trim();
   return top ? top : null;
 }
 
@@ -165,7 +169,7 @@ export async function collectOffice(officeCode: string, options: Options = {}): 
           srchDspsMthod: SALE,
           srchRspbSbr: office.code,
           srchBidPerdType: "0004", // 직접 입력
-          srchBidPerdBgngDt: addDays(today, -7),
+          srchBidPerdBgngDt: today,
           srchBidPerdEndDt: addDays(today, 365),
           srchSortType: "ASC",
           srchWordType: "0001",
