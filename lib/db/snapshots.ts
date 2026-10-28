@@ -99,6 +99,18 @@ export async function recordFailure(week: FiscalWeek, status: "retrying" | "fail
   if (error) throw new Error(`실패 기록 실패: ${error.message}`);
 }
 
+/** 그날 그 주에 이미 임시 보관된 지역본부 이름들 */
+export async function stagedOffices(week: FiscalWeek, collectedOn: DateString): Promise<string[]> {
+  const { data, error } = await db()
+    .from("staged_offices")
+    .select("office")
+    .eq("fiscal_year", week.fiscalYear)
+    .eq("week_no", week.weekNo)
+    .eq("collected_on", collectedOn);
+  if (error) throw new Error(`임시 보관 목록 읽기 실패: ${error.message}`);
+  return (data as { office: string }[]).map((row) => row.office);
+}
+
 /** 주간 기록 전체 (회계연도·주차 순) */
 export async function listSnapshots(): Promise<WeeklySnapshot[]> {
   const { data, error } = await db()
