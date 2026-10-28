@@ -1,5 +1,5 @@
 // 히트맵 화면 (DESIGN 2.1)
-// 지금은 가짜 데이터를 보여 준다. 저장소 연결(PLAN 작업 19) 뒤에는 저장된 데이터를 읽는다.
+// Supabase에 저장된 주간 기록을 읽어 보여 준다 (PLAN 작업 19).
 // 화면 상태는 주소에 담는다: ?fy=회계연도&region=지역본부&week=주차
 // (없으면 올해 · 전국 합계 · 그 회계연도의 가장 최근 성공 주)
 
@@ -13,7 +13,8 @@ import { RegionList } from "@/components/region-list";
 import { WeekSlider } from "@/components/week-slider";
 import { NATIONAL, buildHeatmap, summarizeRegions } from "@/lib/aggregate";
 import { failedWeekToShow, formatKstDateTime, latestSuccess } from "@/lib/collect-status";
-import { MOCK_SNAPSHOTS, getMockItems } from "@/lib/mock-data";
+import { getItems, listSnapshots } from "@/lib/db/snapshots";
+import type { AuctionItem, WeeklySnapshot } from "@/lib/types";
 import { currentFiscalWeek, fiscalWeekFromNumber } from "@/lib/week";
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
@@ -31,6 +32,15 @@ function weekLabel(fiscalYear: number, weekNo: number): string {
   return `${weekNo}주차 (${monthDay(weekStart)}~${monthDay(weekEnd)})`;
 }
 
+/** 저장소 연결 실패 (DESIGN 6장) */
+function LoadError() {
+  return (
+    <p role="alert" className="rounded border border-dashed border-zinc-300 px-4 py-10 text-center text-zinc-600 dark:border-zinc-700 dark:text-zinc-400">
+      지금은 데이터를 불러올 수 없습니다. 잠시 뒤 다시 열어 주세요.
+    </p>
+  );
+}
+
 // 주소(searchParams)와 지금 시각을 읽는 부분. Cache Components 규칙상 <Suspense> 안에서 읽는다.
 async function HeatmapView({ searchParams }: { searchParams: SearchParams }) {
   const params = await searchParams;
@@ -38,11 +48,18 @@ async function HeatmapView({ searchParams }: { searchParams: SearchParams }) {
   await connection();
   const now = new Date();
   const currentYear = currentFiscalWeek(now).fiscalYear;
-  const failedWeek = failedWeekToShow(MOCK_SNAPSHOTS, now);
-  const lastSuccess = latestSuccess(MOCK_SNAPSHOTS);
+
+  let snapshots: WeeklySnapshot[];
+  try {
+    snapshots = await listSnapshots();
+  } catch {
+    return <LoadError />;
+  }
+  const failedWeek = failedWeekToShow(snapshots, now);
+  const lastSuccess = latestSuccess(snapshots);
 
   // 성공한 주만 화면에 쓴다 (실패·재시도 중·수집 안 된 주는 건너뜀)
-  const successWeeks = MOCK_SNAPSHOTS.filter((s) => s.status === "success");
+  const successWeeks = snapshots.filter((s) => s.status === "success");
 
   // 회계연도 메뉴 = 데이터가 있는 연도 + 올해 (최근 연도가 위)
   const years = [...new Set([currentYear, ...successWeeks.map((s) => s.fiscalYear)])].sort((a, b) => b - a);
@@ -103,7 +120,12 @@ async function HeatmapView({ searchParams }: { searchParams: SearchParams }) {
 
   // 주소의 주차가 이 회계연도의 성공한 주가 아니면 가장 최근 성공 주로 연다
   const week = weeks.some((s) => s.weekNo === Number(params.week)) ? Number(params.week) : latestWeek;
-  const items = getMockItems(fiscalYear, week);
+  let items: AuctionItem[];
+  try {
+    items = await getItems(fiscalYear, week);
+  } catch {
+    return <LoadError />;
+  }
   const summaries = summarizeRegions(items);
   // 주소의 지역이 목록에 없으면 전국 합계로 연다
   const region = summaries.some((s) => s.region === requestedRegion) ? requestedRegion : NATIONAL;
