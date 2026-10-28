@@ -8,9 +8,11 @@ import { Suspense } from "react";
 import { FiscalYearSelect } from "@/components/fiscal-year-select";
 import { HeatmapLegend } from "@/components/heatmap-legend";
 import { HeatmapTable } from "@/components/heatmap-table";
+import { CollectFailedBanner } from "@/components/collect-failed-banner";
 import { RegionList } from "@/components/region-list";
 import { WeekSlider } from "@/components/week-slider";
 import { NATIONAL, buildHeatmap, summarizeRegions } from "@/lib/aggregate";
+import { failedWeekToShow, formatKstDateTime, latestSuccess } from "@/lib/collect-status";
 import { MOCK_SNAPSHOTS, getMockItems } from "@/lib/mock-data";
 import { currentFiscalWeek, fiscalWeekFromNumber } from "@/lib/week";
 
@@ -23,12 +25,21 @@ function monthDay(date: string): string {
   return `${Number(month)}.${Number(day)}`;
 }
 
+/** `43주차 (10.19~10.25)` */
+function weekLabel(fiscalYear: number, weekNo: number): string {
+  const { weekStart, weekEnd } = fiscalWeekFromNumber(fiscalYear, weekNo);
+  return `${weekNo}주차 (${monthDay(weekStart)}~${monthDay(weekEnd)})`;
+}
+
 // 주소(searchParams)와 지금 시각을 읽는 부분. Cache Components 규칙상 <Suspense> 안에서 읽는다.
 async function HeatmapView({ searchParams }: { searchParams: SearchParams }) {
   const params = await searchParams;
   // "올해"는 요청이 들어온 시각으로 정해야 하므로, 미리 그리기를 여기서 멈춘다
   await connection();
-  const currentYear = currentFiscalWeek().fiscalYear;
+  const now = new Date();
+  const currentYear = currentFiscalWeek(now).fiscalYear;
+  const failedWeek = failedWeekToShow(MOCK_SNAPSHOTS, now);
+  const lastSuccess = latestSuccess(MOCK_SNAPSHOTS);
 
   // 성공한 주만 화면에 쓴다 (실패·재시도 중·수집 안 된 주는 건너뜀)
   const successWeeks = MOCK_SNAPSHOTS.filter((s) => s.status === "success");
@@ -62,9 +73,20 @@ async function HeatmapView({ searchParams }: { searchParams: SearchParams }) {
   }
 
   const toolbar = (
-    <div className="flex flex-wrap items-center justify-end gap-3">
-      <FiscalYearSelect options={yearOptions} selected={fiscalYear} currentYear={currentYear} />
-    </div>
+    <>
+      {failedWeek ? (
+        <CollectFailedBanner weekLabel={`${failedWeek.fiscalYear}년 ${weekLabel(failedWeek.fiscalYear, failedWeek.weekNo)}`} />
+      ) : null}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-sm text-zinc-500">
+          마지막 성공 수집:{" "}
+          <span className="tabular-nums text-foreground">
+            {lastSuccess?.succeededAt ? formatKstDateTime(lastSuccess.succeededAt) : "아직 없음"}
+          </span>
+        </p>
+        <FiscalYearSelect options={yearOptions} selected={fiscalYear} currentYear={currentYear} />
+      </div>
+    </>
   );
 
   // 고른 회계연도에 성공한 주가 하나도 없을 때
@@ -87,13 +109,9 @@ async function HeatmapView({ searchParams }: { searchParams: SearchParams }) {
   const region = summaries.some((s) => s.region === requestedRegion) ? requestedRegion : NATIONAL;
 
   const regions = summaries.map((s) => ({ ...s, href: viewHref({ fiscalYear, region: s.region, week }) }));
-  const weekLabel = (weekNo: number) => {
-    const { weekStart, weekEnd } = fiscalWeekFromNumber(fiscalYear, weekNo);
-    return `${weekNo}주차 (${monthDay(weekStart)}~${monthDay(weekEnd)})`;
-  };
   const weekOptions = weeks.map((s) => ({
     weekNo: s.weekNo,
-    label: weekLabel(s.weekNo),
+    label: weekLabel(fiscalYear, s.weekNo),
     href: viewHref({ fiscalYear, region, week: s.weekNo }),
   }));
 
@@ -104,7 +122,7 @@ async function HeatmapView({ searchParams }: { searchParams: SearchParams }) {
         <RegionList regions={regions} selected={region} />
         <section className="flex min-w-0 flex-col gap-4">
           <h2 className="text-lg font-medium">
-            {region} · {fiscalYear}년 <span className="text-zinc-500">{weekLabel(week)}</span>
+            {region} · {fiscalYear}년 <span className="text-zinc-500">{weekLabel(fiscalYear, week)}</span>
           </h2>
           <HeatmapTable table={buildHeatmap(items, region)} />
           <HeatmapLegend />
