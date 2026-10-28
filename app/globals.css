@@ -3,6 +3,18 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
+
+  /* 히트맵 5단계 색 (lib/color-scale.ts의 구간과 짝): 0 / 1~5 / 6~20 / 21~50 / 51 이상 */
+  --heat-0: #e4e4e7;
+  --heat-0-fg: #71717a;
+  --heat-1: #fee8c8;
+  --heat-1-fg: #7c2d12;
+  --heat-2: #fdbb84;
+  --heat-2-fg: #7c2d12;
+  --heat-3: #ef6548;
+  --heat-3-fg: #ffffff;
+  --heat-4: #b30000;
+  --heat-4-fg: #ffffff;
 }
 
 @theme inline {
@@ -10,12 +22,36 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+
+  /* bg-heat-N, text-heat-N-fg 클래스로 쓰기 위한 연결 */
+  --color-heat-0: var(--heat-0);
+  --color-heat-0-fg: var(--heat-0-fg);
+  --color-heat-1: var(--heat-1);
+  --color-heat-1-fg: var(--heat-1-fg);
+  --color-heat-2: var(--heat-2);
+  --color-heat-2-fg: var(--heat-2-fg);
+  --color-heat-3: var(--heat-3);
+  --color-heat-3-fg: var(--heat-3-fg);
+  --color-heat-4: var(--heat-4);
+  --color-heat-4-fg: var(--heat-4-fg);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
     --background: #0a0a0a;
     --foreground: #ededed;
+
+    /* 어두운 화면에서는 단계가 높을수록 밝고 진한 주황·빨강으로 */
+    --heat-0: #27272a;
+    --heat-0-fg: #a1a1aa;
+    --heat-1: #431407;
+    --heat-1-fg: #fed7aa;
+    --heat-2: #9a3412;
+    --heat-2-fg: #ffedd5;
+    --heat-3: #ea580c;
+    --heat-3-fg: #ffffff;
+    --heat-4: #f87171;
+    --heat-4-fg: #1c0a0a;
   }
 }
 
