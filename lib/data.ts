@@ -2,7 +2,7 @@
 // PLAN 작업 9에서 같은 모양을 돌려주는 lib/db 조회로 바꾼다.
 
 import { mockDocuments, mockIssues, mockLinks, mockSummaries } from "./mock-data";
-import type { Issue, ReportDocument } from "./types";
+import type { Issue, IssueDocumentLink, ReportDocument, Summary } from "./types";
 
 export interface IssueListItem {
   issue: Issue;
@@ -33,6 +33,31 @@ export async function getIssueList(): Promise<IssueListItem[]> {
         documentCount: mockLinks.filter((l) => l.issueId === issue.id).length,
       };
     });
+}
+
+export interface IssueDetail {
+  issue: Issue;
+  approved: Summary | null;
+  draft: Summary | null;
+  documents: { document: ReportDocument; link: IssueDocumentLink }[]; // 보고일 순
+}
+
+export async function getIssueDetail(id: string): Promise<IssueDetail | null> {
+  const issue = mockIssues.find((i) => i.id === id);
+  if (!issue) return null;
+
+  const summaryOf = (kind: Summary["kind"]) =>
+    mockSummaries.find((s) => s.issueId === id && s.kind === kind) ?? null;
+
+  const documents = mockLinks
+    .filter((l) => l.issueId === id)
+    .flatMap((link) => {
+      const document = mockDocuments.find((d) => d.id === link.documentId);
+      return document ? [{ document, link }] : [];
+    })
+    .sort((a, b) => a.document.reportDate.localeCompare(b.document.reportDate));
+
+  return { issue, approved: summaryOf("approved"), draft: summaryOf("draft"), documents };
 }
 
 export async function getUnclassifiedDocuments(): Promise<ReportDocument[]> {
