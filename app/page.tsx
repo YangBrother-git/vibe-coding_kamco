@@ -1,12 +1,12 @@
 // 히트맵 화면 (DESIGN 2.1)
-// 지금은 가짜 데이터의 가장 최근 성공 주를 보여 준다.
-// 저장소 연결(PLAN 작업 19) 뒤에는 저장된 데이터를 읽는다.
-// 화면 상태는 주소에 담는다: ?region=지역본부 (없으면 전국 합계)
+// 지금은 가짜 데이터를 보여 준다. 저장소 연결(PLAN 작업 19) 뒤에는 저장된 데이터를 읽는다.
+// 화면 상태는 주소에 담는다: ?region=지역본부&week=주차 (없으면 전국 합계 · 가장 최근 성공 주)
 
 import { Suspense } from "react";
 import { HeatmapLegend } from "@/components/heatmap-legend";
 import { HeatmapTable } from "@/components/heatmap-table";
 import { RegionList } from "@/components/region-list";
+import { WeekSlider } from "@/components/week-slider";
 import { NATIONAL, buildHeatmap, summarizeRegions } from "@/lib/aggregate";
 import { MOCK_SNAPSHOTS, getMockItems } from "@/lib/mock-data";
 import { fiscalWeekFromNumber } from "@/lib/week";
@@ -19,41 +19,60 @@ function monthDay(date: string): string {
   return `${Number(month)}.${Number(day)}`;
 }
 
-/** 지역을 고르는 주소. 전국 합계는 주소에서 region을 뺀다. */
-function regionHref(region: string): string {
-  return region === NATIONAL ? "/" : `/?${new URLSearchParams({ region })}`;
+/** 화면 주소 만들기. 기본값(전국 합계, 가장 최근 성공 주)은 주소에서 뺀다. */
+function viewHref(region: string, week: number, latestWeek: number): string {
+  const params = new URLSearchParams();
+  if (region !== NATIONAL) params.set("region", region);
+  if (week !== latestWeek) params.set("week", String(week));
+  const query = params.toString();
+  return query ? `/?${query}` : "/";
 }
 
 // 주소(searchParams)를 읽는 부분. Cache Components 규칙상 <Suspense> 안에서 읽는다.
 async function HeatmapView({ searchParams }: { searchParams: SearchParams }) {
   const params = await searchParams;
 
-  // 기본 화면 = 가장 최근에 성공한 주 (실패·재시도 중인 주는 건너뜀)
-  const latest = MOCK_SNAPSHOTS.filter((s) => s.status === "success").at(-1);
+  // 슬라이더에 넣을 주 = 성공한 주만 (실패·재시도 중·수집 안 된 주는 건너뜀)
+  const successWeeks = MOCK_SNAPSHOTS.filter((s) => s.status === "success");
+  const latest = successWeeks.at(-1);
   if (!latest) {
     return <p className="text-zinc-600 dark:text-zinc-400">이번 회계연도에는 아직 수집된 주가 없습니다</p>;
   }
+  const fiscalYear = latest.fiscalYear;
+  const weeks = successWeeks.filter((s) => s.fiscalYear === fiscalYear);
 
-  const items = getMockItems(latest.fiscalYear, latest.weekNo);
-  const regions = summarizeRegions(items).map((summary) => ({ ...summary, href: regionHref(summary.region) }));
+  // 주소의 주차가 성공한 주가 아니면 가장 최근 성공 주로 연다
+  const requestedWeek = Number(params.week);
+  const snapshot = weeks.find((s) => s.weekNo === requestedWeek) ?? latest;
+  const week = snapshot.weekNo;
 
+  const items = getMockItems(fiscalYear, week);
+  const summaries = summarizeRegions(items);
   // 주소의 지역이 목록에 없으면 전국 합계로 연다
-  const requested = typeof params.region === "string" ? params.region : NATIONAL;
-  const selected = regions.some((r) => r.region === requested) ? requested : NATIONAL;
-  const { weekEnd } = fiscalWeekFromNumber(latest.fiscalYear, latest.weekNo);
+  const requestedRegion = typeof params.region === "string" ? params.region : NATIONAL;
+  const region = summaries.some((s) => s.region === requestedRegion) ? requestedRegion : NATIONAL;
+
+  const regions = summaries.map((s) => ({ ...s, href: viewHref(s.region, week, latest.weekNo) }));
+  const weekLabel = (weekNo: number) => {
+    const { weekStart, weekEnd } = fiscalWeekFromNumber(fiscalYear, weekNo);
+    return `${weekNo}주차 (${monthDay(weekStart)}~${monthDay(weekEnd)})`;
+  };
+  const weekOptions = weeks.map((s) => ({
+    weekNo: s.weekNo,
+    label: weekLabel(s.weekNo),
+    href: viewHref(region, s.weekNo, latest.weekNo),
+  }));
 
   return (
     <div className="grid gap-6 md:grid-cols-[16rem_1fr]">
-      <RegionList regions={regions} selected={selected} />
-      <section className="flex min-w-0 flex-col gap-3">
+      <RegionList regions={regions} selected={region} />
+      <section className="flex min-w-0 flex-col gap-4">
         <h2 className="text-lg font-medium">
-          {selected} · {latest.fiscalYear}년 {latest.weekNo}주차{" "}
-          <span className="text-zinc-500">
-            ({monthDay(latest.weekStart)}~{monthDay(weekEnd)})
-          </span>
+          {region} · {fiscalYear}년 <span className="text-zinc-500">{weekLabel(week)}</span>
         </h2>
-        <HeatmapTable table={buildHeatmap(items, selected)} />
+        <HeatmapTable table={buildHeatmap(items, region)} />
         <HeatmapLegend />
+        <WeekSlider key={week} weeks={weekOptions} selected={week} />
       </section>
     </div>
   );
