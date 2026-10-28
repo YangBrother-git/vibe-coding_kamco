@@ -1,8 +1,9 @@
 // 히트맵 표 (DESIGN 2.1 ④)
 // 세로 = 용도 대분류(+ 맨 아래 "기타"), 가로 = 유찰 0회~5회 이상 6칸, 칸마다 물건 수.
-// 색은 PLAN 작업 8에서 칠한다.
+// 칸 색은 모든 주에 같은 고정 구간 5단계 (lib/color-scale.ts).
 
 import type { HeatmapTable as HeatmapTableData } from "@/lib/aggregate";
+import { heatClassName } from "@/lib/color-scale";
 import { FAIL_BUCKETS } from "@/lib/types";
 
 const BUCKET_LABELS = FAIL_BUCKETS.map((bucket) => (bucket === 5 ? "5회 이상" : `${bucket}회`));
@@ -35,7 +36,7 @@ export function HeatmapTable({ table }: { table: HeatmapTableData }) {
               {row.counts.map((count, bucket) => (
                 <td
                   key={bucket}
-                  className="rounded border border-zinc-200 px-2 py-2 text-center tabular-nums dark:border-zinc-800"
+                  className={`rounded px-2 py-2 text-center font-medium tabular-nums ${heatClassName(count)}`}
                 >
                   {count}
                 </td>

@@ -19,11 +19,11 @@ export type ColorBand = {
 
 /** 고정 구간 5단계: 0 / 1~5 / 6~20 / 21~50 / 51 이상 */
 export const COLOR_BANDS: readonly ColorBand[] = [
-  { level: 0, min: 0, max: 0, label: "0", className: "bg-heat-0 text-heat-0-fg" },
-  { level: 1, min: 1, max: 5, label: "1~5", className: "bg-heat-1 text-heat-1-fg" },
-  { level: 2, min: 6, max: 20, label: "6~20", className: "bg-heat-2 text-heat-2-fg" },
-  { level: 3, min: 21, max: 50, label: "21~50", className: "bg-heat-3 text-heat-3-fg" },
-  { level: 4, min: 51, max: null, label: "51 이상", className: "bg-heat-4 text-heat-4-fg" },
+  { level: 0, min: 0, max: 0, label: "0건", className: "bg-heat-0 text-heat-0-fg" },
+  { level: 1, min: 1, max: 5, label: "1~5건", className: "bg-heat-1 text-heat-1-fg" },
+  { level: 2, min: 6, max: 20, label: "6~20건", className: "bg-heat-2 text-heat-2-fg" },
+  { level: 3, min: 21, max: 50, label: "21~50건", className: "bg-heat-3 text-heat-3-fg" },
+  { level: 4, min: 51, max: null, label: "51건 이상", className: "bg-heat-4 text-heat-4-fg" },
 ];
 
 /** 건수 → 색 단계 */

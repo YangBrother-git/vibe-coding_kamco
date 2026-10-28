@@ -2,6 +2,7 @@
 // 지금은 가짜 데이터의 가장 최근 성공 주를 전국 합계 표로 보여 준다.
 // 저장소 연결(PLAN 작업 19) 뒤에는 저장된 데이터를 읽는다.
 
+import { HeatmapLegend } from "@/components/heatmap-legend";
 import { HeatmapTable } from "@/components/heatmap-table";
 import { NATIONAL, buildHeatmap } from "@/lib/aggregate";
 import { MOCK_SNAPSHOTS, getMockItems } from "@/lib/mock-data";
@@ -31,6 +32,7 @@ export default function Home() {
             </span>
           </h2>
           <HeatmapTable table={buildHeatmap(getMockItems(latest.fiscalYear, latest.weekNo))} />
+          <HeatmapLegend />
         </section>
       ) : (
         <p className="text-zinc-600 dark:text-zinc-400">이번 회계연도에는 아직 수집된 주가 없습니다</p>
