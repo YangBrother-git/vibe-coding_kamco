@@ -2,7 +2,7 @@
 
 # CLAUDE.md — 기획관리팀 주요이슈 총정리 서비스
 
-> 이 파일은 Claude가 이 프로젝트에서 작업할 때 지킬 규칙서다. 기능의 상세 요구사항은 [PRD.md](PRD.md)가 기준이며, 이 파일과 PRD가 다르면 **PRD를 따른다.**
+> 이 파일은 Claude가 이 프로젝트에서 작업할 때 지킬 규칙서다. 기능의 상세 요구사항은 [PRD.md](PRD.md)가 기준이며, 이 파일과 PRD가 다르면 **PRD를 따른다.** 작업 순서는 [PLAN.md](PLAN.md), 구조·스키마·화면은 [DESIGN.md](DESIGN.md)를 따른다.
 
 ## 1. 프로젝트 한 줄 요약
 
@@ -47,27 +47,30 @@ npm run lint    # ESLint
 - **`params`, `searchParams`는 Promise다.** `const { id } = await params` 형태로 쓴다.
 - `middleware.ts`는 폐기되어 **`proxy.ts`**로 이름이 바뀌었다(이번 범위에서는 쓸 일이 거의 없다).
 - 레이아웃 props 타입은 전역 헬퍼 `LayoutProps<"/">` / `PageProps<"/issues/[id]">`를 쓴다(기존 `app/layout.tsx` 참고).
-- Server Action 요청 본문은 기본 1MB 제한이 있다. 20MB 파일 업로드는 **Route Handler(`app/api/.../route.ts`)** 로 받는 것을 기본으로 하고, 배포 환경(Vercel)의 요청 크기 제한도 함께 확인한다.
+- 업로드는 **브라우저에서 글만 추출해 `POST /api/documents`(Route Handler)로 전송**한다. 원본 파일은 서버로 보내지 않는다(DESIGN.md D2). Server Action은 본문 기본 1MB 제한이 있어 업로드에 쓰지 않는다.
 
-## 5. 폴더 구조 (목표안)
+## 5. 폴더 구조
 
 ```
 app/
   page.tsx                 # 이슈 목록 화면 (+ 미분류 목록)
   issues/[id]/page.tsx     # 이슈 정리본 화면
-  api/                     # 서버 쪽 코드 (업로드·분류·승인 등)
-    upload/route.ts
+  api/documents/route.ts   # 업로드(추출된 글)·분류
+  actions.ts               # Server Actions (승인·반려·삭제·재분류·역할)
 lib/
-  extract/                 # 파일 형식별 글 추출 (txt, pdf, docx, pptx, hwpx)
-  ai/                      # OpenAI 호출, 프롬프트, 분류·정리 로직
-  db/                      # Supabase 클라이언트·조회/저장 함수
-  mask.ts                  # 주민번호·전화번호 *** 가리기
+  types.ts                 # 데이터 모델 타입
+  messages.ts              # PRD 안내 문구 상수
+  mask.ts                  # 주민번호·전화번호 *** 가리기 (브라우저·서버 공용)
+  extract/                 # 형식별 글 추출 (브라우저 전용)
+  db/                      # Supabase 조회/저장 (server-only)
+  ai/                      # OpenAI 분류·정리 (server-only)
+  pipeline/                # 업로드·재생성·반려 흐름 조립 (server-only)
 components/                # 재사용 UI 컴포넌트
-supabase/
-  migrations/              # 테이블 생성·변경 SQL (스키마 변경은 반드시 여기에 기록)
+supabase/migrations/       # 테이블 생성·변경 SQL (스키마 변경은 반드시 여기에 기록)
+samples/                   # 민감 정보 없는 시험용 자료
 ```
 
-새 폴더를 만들 때는 이 구조를 따르되, 바꿔야 하면 이 파일도 함께 고친다.
+상세는 DESIGN.md 11.1. 구조를 바꿔야 하면 DESIGN.md와 이 파일을 함께 고친다.
 
 ## 6. 작업 방식 (가장 중요)
 
