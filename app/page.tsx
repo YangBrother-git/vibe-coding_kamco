@@ -140,6 +140,14 @@ export default function Home({ searchParams }: PageProps<"/">) {
       <Suspense fallback={<p className="text-zinc-500">불러오는 중…</p>}>
         <HeatmapView searchParams={searchParams} />
       </Suspense>
+      {/* 출처 표시: 온비드 사이트이용정책(공공누리 제1유형) — DESIGN 9장 ⑩ */}
+      <footer className="mt-auto border-t border-zinc-200 pt-4 text-xs text-zinc-500 dark:border-zinc-800">
+        자료 출처: 온비드(
+        <a href="https://www.onbid.co.kr" className="underline" target="_blank" rel="noopener noreferrer">
+          www.onbid.co.kr
+        </a>
+        ) 압류재산 물건 목록 · 한국자산관리공사 · 공공누리 제1유형(출처표시) · 개인 업무 참고용
+      </footer>
     </main>
   );
 }

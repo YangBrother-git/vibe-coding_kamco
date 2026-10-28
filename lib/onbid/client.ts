@@ -1,63 +1,78 @@
-// 온비드 공개 API로 압류재산 물건 모으기 (PLAN 작업 16 / DESIGN 3.1 / PRD 5장 must ②)
-// - 차세대 온비드 부동산·동산·차량 물건목록 조회서비스 3곳에서, 압류재산(0007)·매각만 받는다.
-//   이 서비스들은 "입찰 중이거나 입찰 예정인 물건"만 돌려준다.
-// - 필수 조건인 수의계약가능여부(Y/N)가 하나만 고를 수 있어, 서비스마다 두 번씩 부른다.
-// - 모든 페이지를 끝까지 받는다. 한 번이라도 실패하거나 한도에 걸리면 전부 버리고 실패로 돌려준다
-//   (일부만 저장하면 숫자가 틀려지므로).
-// - 물건마다 5가지 항목만 남기고 나머지(의뢰기관·주소 등)는 버린다.
-//
-// ⚠ 아직 실제 응답으로 확인하지 못한 부분 (PLAN 작업 14에서 확인)
-//   - 지역본부: 공고기관명(orgNm) 안에서 알려진 지역본부 이름을 찾는다. 실제 표기와 다르면 고친다.
-//   - 한 페이지 최대 건수, 응답 JSON의 정확한 겉모양.
+// 온비드 웹사이트에서 압류재산 물건 모으기 (PLAN 작업 16 / DESIGN 3.1, 9장 ⑩·⑪ / PRD 5장 must ②)
+// - 온비드 "물건 > 재산유형 > 압류재산" 목록 화면이 불러오는 JSON을 그대로 받는다(로그인 없이).
+// - 지역본부 1곳씩 받는다. 한 번의 실행 시간 한도를 넘지 않게 하기 위해서다.
+//   12곳을 모아 그 주로 확정하는 일은 저장 단계(PLAN 작업 18·20)가 맡는다.
+// - 부동산·동산·차량 세 종류를 모든 페이지 받는다. 요청 사이에는 최소 3초를 쉰다.
+// - 입찰 기간이 일주일 전 ~ 1년 뒤인 물건을 받아, "입찰준비중·입찰진행중"만 남긴다
+//   (검색 시작일을 오늘로 하면 이미 입찰이 시작된 물건이 빠지기 때문).
+// - 한 번이라도 실패하거나 받은 건수가 전체 건수보다 적으면 전부 버리고 실패로 돌려준다.
+// - 물건마다 5가지 항목만 남기고 나머지(주소·금액 등)는 버린다.
 
 import "server-only";
-import { KNOWN_REGION_OFFICES } from "../known-values";
+import { REGION_OFFICES } from "../known-values";
 import type { AuctionItem } from "../types";
 import { toKstDate } from "../week";
 
-const SERVICES = [
-  { name: "부동산", url: "https://apis.data.go.kr/B010003/OnbidRlstListSrvc2/getRlstCltrList2" },
-  { name: "동산", url: "https://apis.data.go.kr/B010003/OnbidMvastListSrvc2/getMvastCltrList2" },
-  { name: "차량", url: "https://apis.data.go.kr/B010003/OnbidCarListSrvc2/getCarCltrList2" },
+const LIST_URL =
+  "https://www.onbid.co.kr/op/cltrpbancinf/clbtcltrclg/prptclbtcltrclg/PrptClbtCltrController/inqSzrPrptCltrClg.do";
+
+/** 물건유형 (온비드 검색 조건 srchCltrType) */
+const CLTR_TYPES = [
+  { code: "0001", name: "부동산" },
+  { code: "0003", name: "동산" },
+  { code: "0002", name: "차량" },
 ] as const;
 
 const SEIZED = "0007"; // 재산유형: 압류재산
 const SALE = "0001"; // 처분방식: 매각
 const PAGE_SIZE = 100;
-const MAX_PAGES = 500; // 응답이 이상해 끝없이 넘기는 일을 막는 안전장치
+const MAX_PAGES = 200; // 응답이 이상해 끝없이 넘기는 일을 막는 안전장치
+const REQUEST_GAP_MS = 3000; // 요청 간격 최소 3초 (PRD 5장)
+const OPEN_STATUSES = new Set(["입찰준비중", "입찰진행중"]);
 
 /** 수집 실패 이유 */
 export type CollectFailure =
-  | "no-key" // .env에 키가 없음
-  | "quota" // 하루·초당 호출 한도 초과 (오류코드 22·23)
-  | "auth" // 등록되지 않았거나 만료된 키 (오류코드 20·30·31)
-  | "http" // 응답 자체가 실패
-  | "format"; // 응답 모양을 읽을 수 없음
+  | "office" // 모르는 지역본부 코드
+  | "http" // 응답 자체가 실패 (접속 오류·차단 포함)
+  | "format"; // 응답 모양을 읽을 수 없음 (사이트 구조 변경, 대기열 화면 등)
 
-export type CollectResult =
+export type OfficeCollectResult =
   | {
       ok: true;
+      office: string;
       items: AuctionItem[];
       stats: {
-        /** 서비스별 API가 알려 준 전체 건수 (수의계약 N+Y 합) */
-        totalCount: Record<string, number>;
+        /** 물건유형별 사이트가 알려 준 전체 건수 (마감된 물건 포함) */
+        rowCount: Record<string, number>;
+        /** 입찰준비중·입찰진행중이 아니어서 뺀 건수 */
+        closed: number;
         /** 같은 물건번호가 여러 번 와서 빼 낸 건수 */
         duplicates: number;
-        /** 유찰 횟수가 숫자가 아니어서 뺀 건수 (짐작해서 채우지 않음) */
+        /** 유찰 횟수가 비었거나 숫자가 아니어서 뺀 건수 (DESIGN 9장 ⑨) */
         invalidFailCount: number;
         requests: number;
         ms: number;
       };
     }
-  | { ok: false; reason: CollectFailure; message: string };
+  | { ok: false; office: string; reason: CollectFailure; message: string };
 
-/** API 응답 item 중 이 앱이 읽는 항목 */
+/** 사이트 응답 중 이 앱이 읽는 항목 */
 type RawItem = {
-  cltrMngNo?: string;
-  prptDivCd?: string;
-  orgNm?: string;
-  cltrUsgLclsCtgrNm?: string;
-  usbdNft?: number | string;
+  scrnIndctCltrMngNo?: string;
+  cltrPrptDivCd?: string;
+  ctgrFullNm?: string;
+  uscbdCnt?: string | number | null;
+  pbctCltrStatNm?: string | null;
+  pbancPbctCltrStatNm?: string | null;
+  rowcount?: string | number;
+};
+
+type Options = {
+  now?: Date;
+  /** 시험할 때 가짜 응답을 넣기 위한 자리 */
+  fetchImpl?: typeof fetch;
+  /** 시험할 때 기다리지 않게 하기 위한 자리 */
+  sleep?: (ms: number) => Promise<void>;
 };
 
 class CollectError extends Error {
@@ -69,144 +84,146 @@ class CollectError extends Error {
   }
 }
 
-/** 포털은 "인코딩 키"(이미 % 로 바뀐 것)와 "디코딩 키"를 준다. 어느 쪽이든 한 번만 인코딩되게 맞춘다. */
-function encodedServiceKey(): string {
-  const key = process.env.ONBID_API_KEY?.trim();
-  if (!key) throw new CollectError("no-key", "ONBID_API_KEY가 .env에 없습니다");
-  return key.includes("%") ? key : encodeURIComponent(key);
+const defaultSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+/** `2026-10-29` 에 며칠 더하기 */
+function addDays(date: string, days: number): string {
+  const d = new Date(`${date}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
 }
 
-/** 공고기관명에서 지역본부 이름 찾기. 못 찾으면 원본 그대로 둔다(셀 때 "기타"가 된다). */
-export function regionFromOrgName(orgNm: string | undefined): string | null {
-  const name = orgNm?.replace(/\s+/g, "") ?? "";
-  if (!name) return null;
-  return KNOWN_REGION_OFFICES.find((office) => name.includes(office)) ?? orgNm!.trim();
-}
-
-/** 응답에서 오류코드 꺼내기 (게이트웨이 오류와 서비스 오류 모양이 다름) */
-function errorCode(json: unknown): string | null {
-  const j = json as {
-    OpenAPI_ServiceResponse?: { cmmMsgHeader?: { returnReasonCode?: string } };
-    header?: { resultCode?: string };
-    response?: { header?: { resultCode?: string } };
-  };
-  const gateway = j.OpenAPI_ServiceResponse?.cmmMsgHeader?.returnReasonCode;
-  if (gateway) return gateway;
-  const code = j.header?.resultCode ?? j.response?.header?.resultCode;
-  return code && code !== "00" && code !== "0" ? code : null;
-}
-
-function failureFor(code: string): CollectFailure {
-  if (code === "22" || code === "23") return "quota";
-  if (code === "20" || code === "30" || code === "31") return "auth";
-  return "http";
+/** `"주거용건물 / 단독주택"` → `"주거용건물"` */
+export function topCategory(ctgrFullNm: string | undefined): string | null {
+  const top = ctgrFullNm?.split("/")[0]?.trim();
+  return top ? top : null;
 }
 
 async function fetchPage(
   fetchImpl: typeof fetch,
-  url: string,
-  key: string,
-  pvctTrgtYn: "N" | "Y",
-  pageNo: number,
-): Promise<{ totalCount: number; items: RawItem[] }> {
-  const query = new URLSearchParams({
-    pageNo: String(pageNo),
-    numOfRows: String(PAGE_SIZE),
-    resultType: "json",
-    prptDivCd: SEIZED,
-    pvctTrgtYn,
-    dspsMthodCd: SALE,
+  form: Record<string, string>,
+): Promise<{ rowCount: number; items: RawItem[] }> {
+  const res = await fetchImpl(LIST_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+      "X-Requested-With": "XMLHttpRequest",
+      "User-Agent": "Mozilla/5.0 (onbid-heatmap; weekly personal statistics)",
+    },
+    body: new URLSearchParams(form),
+    cache: "no-store",
   });
-  // 키는 이미 인코딩돼 있어 URLSearchParams에 넣지 않는다 (두 번 인코딩 방지)
-  const res = await fetchImpl(`${url}?serviceKey=${key}&${query}`, { cache: "no-store" });
+  if (!res.ok) throw new CollectError("http", `HTTP ${res.status}`);
   const text = await res.text();
-  let json: unknown;
+  let json: { cltrInfVOList?: RawItem[]; totalCount?: number | string };
   try {
     json = JSON.parse(text);
   } catch {
-    throw new CollectError("format", `JSON이 아닌 응답 (HTTP ${res.status})`);
+    // 대기열(NetFunnel) 화면이나 오류 화면이 HTML로 오는 경우
+    throw new CollectError("format", "목록 JSON이 아닌 응답을 받았습니다");
   }
-  const code = errorCode(json);
-  if (code) throw new CollectError(failureFor(code), `API 오류코드 ${code} (HTTP ${res.status})`);
-  if (!res.ok) throw new CollectError("http", `HTTP ${res.status}`);
-
-  const j = json as { body?: Body; response?: { body?: Body } };
-  type Body = { totalCount?: number | string; items?: { item?: RawItem | RawItem[] } | "" };
-  const body = j.body ?? j.response?.body;
-  const totalCount = Number(body?.totalCount);
-  if (!body || !Number.isInteger(totalCount)) throw new CollectError("format", "응답에 totalCount가 없습니다");
-  const raw = body.items && typeof body.items === "object" ? body.items.item : undefined;
-  return { totalCount, items: raw === undefined ? [] : Array.isArray(raw) ? raw : [raw] };
+  if (!Array.isArray(json.cltrInfVOList)) throw new CollectError("format", "응답에 물건 목록이 없습니다");
+  const list = json.cltrInfVOList;
+  const rowCount = Number(list[0]?.rowcount ?? json.totalCount ?? 0);
+  if (!Number.isInteger(rowCount) || rowCount < 0) throw new CollectError("format", "전체 건수를 읽을 수 없습니다");
+  return { rowCount, items: list };
 }
 
 /**
- * 압류재산 물건 전체 수집.
- * @param now 수집 시각 (수집일 계산용)
- * @param fetchImpl 시험할 때 가짜 응답을 넣기 위한 자리
+ * 지역본부 1곳의 압류재산 물건 수집.
+ * @param officeCode 온비드 담당부점 코드 (lib/known-values.ts의 REGION_OFFICES)
  */
-export async function collectSeizedItems(
-  now: Date = new Date(),
-  fetchImpl: typeof fetch = fetch,
-): Promise<CollectResult> {
+export async function collectOffice(officeCode: string, options: Options = {}): Promise<OfficeCollectResult> {
+  const { now = new Date(), fetchImpl = fetch, sleep = defaultSleep } = options;
+  const office = REGION_OFFICES.find((o) => o.code === officeCode);
+  if (!office) return { ok: false, office: officeCode, reason: "office", message: `모르는 지역본부 코드: ${officeCode}` };
+
   const started = Date.now();
   try {
-    const key = encodedServiceKey();
-    const collectedOn = toKstDate(now);
+    const today = toKstDate(now);
     const byItemNo = new Map<string, AuctionItem>();
-    const totalCount: Record<string, number> = {};
+    const rowCount: Record<string, number> = {};
+    let closed = 0;
     let duplicates = 0;
     let invalidFailCount = 0;
     let requests = 0;
 
-    for (const service of SERVICES) {
-      for (const pvct of ["N", "Y"] as const) {
-        let received = 0;
-        for (let pageNo = 1; ; pageNo++) {
-          if (pageNo > MAX_PAGES) throw new CollectError("format", `${service.name}: 페이지가 너무 많습니다`);
-          const page = await fetchPage(fetchImpl, service.url, key, pvct, pageNo);
-          requests++;
-          if (pageNo === 1) totalCount[service.name] = (totalCount[service.name] ?? 0) + page.totalCount;
-          received += page.items.length;
+    for (const type of CLTR_TYPES) {
+      let received = 0;
+      for (let pageNo = 1; ; pageNo++) {
+        if (pageNo > MAX_PAGES) throw new CollectError("format", `${type.name}: 페이지가 너무 많습니다`);
+        if (requests > 0) await sleep(REQUEST_GAP_MS);
+        const page = await fetchPage(fetchImpl, {
+          pageIndex: String(pageNo),
+          pageUnit: String(PAGE_SIZE),
+          pageSize: String(PAGE_SIZE),
+          recordCountPerPage: String(PAGE_SIZE),
+          firstIndex: String((pageNo - 1) * PAGE_SIZE),
+          lastIndex: String(pageNo * PAGE_SIZE),
+          srchCltrType: type.code,
+          srchPrptType: SEIZED,
+          srchDspsMthod: SALE,
+          srchRspbSbr: office.code,
+          srchBidPerdType: "0004", // 직접 입력
+          srchBidPerdBgngDt: addDays(today, -7),
+          srchBidPerdEndDt: addDays(today, 365),
+          srchSortType: "ASC",
+          srchWordType: "0001",
+          searchCltrMnmtNoYn: "N",
+        });
+        requests++;
+        if (pageNo === 1) rowCount[type.name] = page.rowCount;
+        received += page.items.length;
 
-          for (const raw of page.items) {
-            if (raw.prptDivCd && raw.prptDivCd !== SEIZED) continue; // 압류재산만
-            const itemNo = raw.cltrMngNo?.trim();
-            if (!itemNo) throw new CollectError("format", `${service.name}: 물건관리번호가 없는 물건이 있습니다`);
-            const failCount = Number(raw.usbdNft);
-            if (raw.usbdNft === undefined || raw.usbdNft === "" || !Number.isInteger(failCount) || failCount < 0) {
-              invalidFailCount++;
-              continue;
-            }
-            if (byItemNo.has(itemNo)) {
-              duplicates++;
-              continue;
-            }
-            byItemNo.set(itemNo, {
-              itemNo,
-              regionOffice: regionFromOrgName(raw.orgNm),
-              category: raw.cltrUsgLclsCtgrNm?.trim() || null,
-              failCount,
-              collectedOn,
-            });
+        for (const raw of page.items) {
+          if (raw.cltrPrptDivCd && raw.cltrPrptDivCd !== SEIZED) continue; // 압류재산만
+          const status = raw.pbctCltrStatNm ?? raw.pbancPbctCltrStatNm ?? "";
+          if (!OPEN_STATUSES.has(status)) {
+            closed++;
+            continue;
           }
+          const itemNo = raw.scrnIndctCltrMngNo?.trim();
+          if (!itemNo) throw new CollectError("format", `${type.name}: 물건관리번호가 없는 물건이 있습니다`);
+          const failText = raw.uscbdCnt === null || raw.uscbdCnt === undefined ? "" : String(raw.uscbdCnt).trim();
+          const failCount = Number(failText);
+          if (failText === "" || !Number.isInteger(failCount) || failCount < 0) {
+            invalidFailCount++;
+            continue;
+          }
+          if (byItemNo.has(itemNo)) {
+            duplicates++;
+            continue;
+          }
+          byItemNo.set(itemNo, {
+            itemNo,
+            regionOffice: office.name,
+            category: topCategory(raw.ctgrFullNm),
+            failCount,
+            collectedOn: today,
+          });
+        }
 
-          if (received >= page.totalCount) break;
-          // 전체 건수에 못 미쳤는데 빈 페이지가 오면 "일부만 받은 것"이므로 실패
-          if (page.items.length === 0) {
-            throw new CollectError("format", `${service.name}: ${page.totalCount}건 중 ${received}건만 받았습니다`);
-          }
+        if (received >= page.rowCount) break;
+        // 전체 건수에 못 미쳤는데 빈 페이지가 오면 "일부만 받은 것"이므로 실패
+        if (page.items.length === 0) {
+          throw new CollectError("format", `${type.name}: ${page.rowCount}건 중 ${received}건만 받았습니다`);
         }
       }
     }
 
     return {
       ok: true,
+      office: office.name,
       items: [...byItemNo.values()],
-      stats: { totalCount, duplicates, invalidFailCount, requests, ms: Date.now() - started },
+      stats: { rowCount, closed, duplicates, invalidFailCount, requests, ms: Date.now() - started },
     };
   } catch (error) {
-    if (error instanceof CollectError) return { ok: false, reason: error.reason, message: error.message };
-    // 네트워크 끊김 등. 메시지에 주소(키 포함)가 섞이지 않게 이름만 남긴다.
-    return { ok: false, reason: "http", message: `요청 실패: ${error instanceof Error ? error.name : "알 수 없음"}` };
+    if (error instanceof CollectError) return { ok: false, office: office.name, reason: error.reason, message: error.message };
+    return {
+      ok: false,
+      office: office.name,
+      reason: "http",
+      message: `요청 실패: ${error instanceof Error ? error.message : "알 수 없음"}`,
+    };
   }
 }

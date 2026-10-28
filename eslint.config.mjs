@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // 지울 파일 임시 보관 폴더 (CLAUDE.md 0장 7번)
+    "trash-can/**",
   ]),
 ]);
 

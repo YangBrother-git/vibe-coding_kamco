@@ -5,7 +5,7 @@
 //
 // 전제: 같은 주에 같은 물건번호는 이미 하나만 들어온다 (수집 단계에서 정리, DESIGN 4.1).
 
-import { KNOWN_CATEGORIES, KNOWN_REGION_OFFICES, OTHER } from "./known-values";
+import { KNOWN_CATEGORIES, KNOWN_REGION_OFFICES, OTHER, REGION_ALIASES } from "./known-values";
 import { FAIL_BUCKETS, type AuctionItem, type FailBucket } from "./types";
 
 /** 지역 선택 메뉴 맨 위에 두는 전국 합계 이름 */
@@ -43,10 +43,11 @@ export type RegionSummary = {
 const knownRegions = new Set(KNOWN_REGION_OFFICES);
 const knownCategories = new Set(KNOWN_CATEGORIES);
 
-/** 지역본부 값 정리: 비어 있거나 목록에 없으면 "기타" */
+/** 지역본부 값 정리: 다른 표기(광주전남 등)는 지정 이름으로, 비어 있거나 목록에 없으면 "기타" */
 export function normalizeRegion(value: string | null): string {
   const v = value?.trim() ?? "";
-  return knownRegions.has(v) ? v : OTHER;
+  const name = REGION_ALIASES[v] ?? v;
+  return knownRegions.has(name) ? name : OTHER;
 }
 
 /** 용도 대분류 값 정리: 비어 있거나 목록에 없으면 "기타" */
