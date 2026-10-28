@@ -1,7 +1,9 @@
-// 이슈 목록 화면. 역할 전환(작업 6)·업로드 버튼(작업 11)은 이후 작업에서 머리 영역에 추가한다.
+// 이슈 목록 화면. 업로드 버튼(작업 11)은 이후 작업에서 머리 영역에 추가한다.
 // Design Ref: DESIGN.md §6.1
 
+import { Suspense } from "react";
 import { IssueCard } from "@/components/issue-card";
+import { RoleSwitch, RoleSwitchFallback } from "@/components/role-switch";
 import { UnclassifiedList } from "@/components/unclassified-list";
 import { getIssueList, getUnclassifiedDocuments } from "@/lib/data";
 
@@ -15,7 +17,12 @@ export default async function Home() {
   return (
     <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-8 px-4 py-10 sm:px-6">
       <header className="flex flex-col gap-1">
-        <h1 className="text-2xl font-semibold tracking-tight">주요이슈 총정리</h1>
+        <div className="flex items-center justify-between gap-3">
+          <h1 className="text-2xl font-semibold tracking-tight">주요이슈 총정리</h1>
+          <Suspense fallback={<RoleSwitchFallback />}>
+            <RoleSwitch />
+          </Suspense>
+        </div>
         <p className="text-zinc-600 dark:text-zinc-400">
           기획관리팀 보고자료를 이슈별로 모아 최신 현황과 흐름을 보여 줍니다.
         </p>
