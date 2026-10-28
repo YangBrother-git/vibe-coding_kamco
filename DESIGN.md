@@ -24,6 +24,10 @@
 | D5 | 갱신안 생성 방식 | 이슈에 연결된 **모든 자료로 매번 새로 생성** | "대기 중 새 자료 합치기", "삭제 후 재생성"이 같은 함수 하나로 해결된다 |
 | D6 | 역할 구분 | `role` 쿠키(`lead` / `member`) + 화면 상단 전환 스위치 | 로그인 없이 역할만 구분(PRD 비범위 준수). 보안 장치가 아니라 표시 구분이다 |
 | D7 | 데이터 갱신 | 캐시(`"use cache"`) 미사용, 페이지는 매 요청 DB 조회 | 데이터가 자주 바뀌고 규모가 작다. 변경 후 Server Action은 `refresh()`, 업로드 후에는 `router.refresh()` |
+| D8 | 1분 제한 | 요청 한 건 전체에 **60초 마감 하나**. 모든 AI 호출(재요청 포함)은 남은 시간 안에서만 실행 | PRD "1분 이내 갱신안", "1분 넘기면 실패"를 호출별이 아닌 전체 기준으로 지킨다 |
+| D9 | 정리본 입력 | 분류 때 자료별 **요점 메모(digest, 1,000자 이내)**를 만들어 저장하고, 정리본은 메모만으로 생성 | 자료가 늘어도 AI 입력이 작게 유지되어 빠르고 저렴하다 |
+| D10 | 삭제 후 확정본 | 삭제된 자료가 확정본에 포함되어 있으면 확정본에 "삭제된 자료 포함" 표시. 다음 승인 때 해제 | 갱신안이 반려되어도 확정본이 오래된 내용임을 알 수 있다 |
+| D11 | 빈 이슈 | 연결된 자료도 확정본도 없는 이슈는 자동 삭제 | 내용 없는 이슈가 목록에 남지 않게 한다 |
 
 ---
 
@@ -80,12 +84,14 @@
 → [브라우저] 글 추출 ─읽을 수 없음→ "글자를 읽을 수 없는 파일입니다 (사유: …)"
 → [브라우저] 개인정보 가리기 + 해시 계산 → 원본 참조 해제
 → [서버] 중복 검사 ─중복→ "이미 올린 자료입니다"
-→ [서버] documents 저장 (status = pending)
-→ [서버] 분류 (기존 이슈 목록 + 글) ─실패/60초 초과→ status = unclassified + "분류에 실패했습니다. 다시 시도해 주세요"
-→ [서버] 연결 저장 (70점 이상 최대 3개, 없으면 새 이슈 1개)
-→ [서버] 연결된 이슈마다 갱신안 재생성 (병렬) ─실패→ 연결 되돌리고 unclassified + 같은 안내
+→ [서버] documents 저장 (status = pending) · 60초 마감 시작 (D8)
+→ [서버] 분류 + 요점 메모 생성 (기존 이슈 목록 + 글) ─실패/마감 초과→ status = unclassified + "분류에 실패했습니다. 다시 시도해 주세요"
+→ [서버] 연결·요점 메모 저장 (70점 이상 최대 3개, 없으면 새 이슈 1개)
+→ [서버] 연결된 이슈마다 갱신안 재생성 (병렬, 남은 시간 안에서) ─실패→ 연결 되돌리고 unclassified + 같은 안내
 → status = classified → 응답 → 화면 refresh
 ```
+
+시간 배분 기준: 분류 + 요점 메모 최대 25초, 갱신안 생성 최대 30초, 나머지는 DB 처리 여유. 재요청은 남은 시간이 10초 이상일 때만 한다.
 
 ### 2.3 의존성 (설치 예정 패키지)
 
@@ -111,6 +117,7 @@ export type DocumentStatus = "pending" | "classified" | "unclassified";
 export interface Issue {
   id: string;
   name: string;              // 20자 이내 명사형
+  needsRegeneration: boolean; // 삭제·반려 후 갱신안 재생성 실패 시 true
   createdAt: string;
   updatedAt: string;
 }
@@ -120,6 +127,7 @@ export interface ReportDocument {
   fileName: string;
   contentHash: string;       // 원본 바이트 SHA-256 (브라우저 계산)
   text: string;              // 개인정보 가린 추출 글
+  digest: string | null;     // 요점 메모 1,000자 이내 (분류 때 생성, D9)
   reportDate: string;        // YYYY-MM-DD
   reportDateIsUpload: boolean; // true면 화면에 "(업로드일)" 표시
   status: DocumentStatus;
@@ -149,6 +157,7 @@ export interface Summary {
   currentStatus: string;     // 3문장 이내, 불일치 시 "자료 간 내용 불일치 — 확인 필요" 포함
   timeline: TimelineItem[];
   documentIds: string[];     // 이 정리본을 만든 자료들
+  includesDeleted: boolean;  // 확정본에 삭제된 자료 내용이 남아 있음 (D10)
   createdAt: string;
   approvedAt: string | null;
 }
@@ -179,6 +188,7 @@ export interface Rejection {
 create table issues (
   id uuid primary key default gen_random_uuid(),
   name text not null unique check (char_length(name) <= 20),
+  needs_regeneration boolean not null default false,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -188,6 +198,7 @@ create table documents (
   file_name text not null,
   content_hash text not null,
   text text not null,
+  digest text check (char_length(digest) <= 1000),
   report_date date not null,
   report_date_is_upload boolean not null default false,
   status text not null default 'pending'
@@ -212,6 +223,7 @@ create table summaries (
   current_status text not null,
   timeline jsonb not null default '[]',
   document_ids uuid[] not null default '{}',
+  includes_deleted boolean not null default false,
   created_at timestamptz not null default now(),
   approved_at timestamptz,
   unique (issue_id, kind)                      -- 확정본 1개, 갱신안 1개
@@ -245,6 +257,7 @@ alter table rejections      enable row level security;
 | Server Action | `rejectDraft(issueId, reason, correctedIssueName?)` | 반려 기록 → 재분류 또는 미분류 | 팀장 |
 | Server Action | `retryClassify(documentId)` | 미분류 자료 다시 분류 | 모두 |
 | Server Action | `deleteDocument(documentId)` | 자료 삭제 → 연결 이슈 갱신안 재생성 | 모두 |
+| Server Action | `regenerateDraft(issueId)` | "재생성 필요" 이슈의 갱신안 다시 만들기 | 모두 |
 | Server Action | `setRole(role)` | `role` 쿠키 변경 | 모두 |
 
 업로드만 Route Handler로 하는 이유: 추출 글이 Server Action 기본 본문 제한(1MB)을 넘을 수 있다. 나머지는 작은 요청이라 Server Action으로 하고 끝에 `refresh()`를 호출한다.
@@ -274,10 +287,23 @@ alter table rejections      enable row level security;
 
 ### 4.3 반려 처리 상세 (`rejectDraft`)
 
-1. `rejections`에 사유·대상 자료(`draft.document_ids` 중 확정본에 없던 자료) 저장
-2. 갱신안 삭제, 대상 자료와 이 이슈의 연결 삭제
-3. `correctedIssueName`이 있으면 → 그 이름의 이슈(없으면 생성)에 연결(점수 100, 이유 "팀장 반려 시 지정") → 그 이슈 갱신안 재생성
-4. 없으면 → 다른 이슈 연결이 하나도 없는 자료는 `unclassified`로 변경
+0. 입력 검사: 사유는 필수, `correctedIssueName`은 앞뒤 공백 제거 후 **1~20자**(아니면 반려하지 않고 안내)
+1. 대상 자료 = `draft.document_ids` 중 확정본에 없던 자료. `rejections`에 사유·대상 자료 저장
+2. 갱신안 삭제
+3. **대상 자료가 없으면**(삭제로 생긴 갱신안 등) 여기서 끝낸다. 확정본은 그대로 두고, 삭제된 자료가 들어 있으면 "삭제된 자료 포함" 표시가 유지된다(D10).
+4. 대상 자료와 이 이슈의 연결 삭제
+5. `correctedIssueName`이 있으면 → 그 이름의 이슈(없으면 생성)에 연결(점수 100, 이유 "팀장 반려 시 지정") → 그 이슈 갱신안 재생성
+6. 없으면 → 다른 이슈 연결이 하나도 없는 자료는 `unclassified`로 변경(사유 "반려: {사유}")
+7. 이 이슈에 연결 자료도 확정본도 없으면 이슈 삭제(D11)
+8. 5의 재생성이 실패하면 그 이슈에 `needs_regeneration = true`
+
+### 4.4 삭제 처리 상세 (`deleteDocument`)
+
+1. 자료가 연결된 이슈 목록을 구한 뒤 자료 삭제(연결은 cascade로 함께 삭제)
+2. 각 이슈의 확정본 `document_ids`에 이 자료가 있으면 `includes_deleted = true`
+3. 각 이슈: 남은 자료가 없고 확정본도 없으면 이슈 삭제(D11), 남은 자료가 있으면 갱신안 재생성
+4. 재생성이 실패한 이슈는 `needs_regeneration = true` → 정리본 화면에 [갱신안 다시 만들기] 버튼
+5. 승인(`approveDraft`) 시 `includes_deleted = false`, `needs_regeneration = false`로 되돌린다.
 
 ## 5. AI 설계
 
@@ -288,23 +314,26 @@ alter table rejections      enable row level security;
 ```json
 { "scores": [{ "issueId": "uuid", "score": 0, "reason": "1문장" }],
   "newIssue": { "name": "20자 이내 명사형", "reason": "1문장" },
-  "reportDate": "YYYY-MM-DD | null" }
+  "reportDate": "YYYY-MM-DD | null",
+  "digest": "자료의 날짜·핵심 사실 요점 메모, 1,000자 이내" }
 ```
+- `digest`가 1,000자를 넘으면 잘라서 저장한다. 원문에 없는 내용을 쓰지 않도록 프롬프트에 명시한다.
 - **코드 규칙**: `score ≥ 70` 필터 → 점수 내림차순 상위 3개 → 하나도 없으면 `newIssue` 사용(이름 20자 초과 시 다시 요청 1회, 그래도 넘으면 자름) → `reportDate`가 없거나 형식이 틀리면 업로드일 + `reportDateIsUpload = true`
 - 같은 이름의 이슈가 이미 있으면 새로 만들지 않고 그 이슈에 연결한다.
 
 ### 5.2 정리본 생성 (`lib/ai/summarize.ts`)
 
-- **입력**: 이슈 이름 + 연결된 모든 자료(보고 날짜순, 파일명·날짜·글)
+- **입력**: 이슈 이름 + 연결된 모든 자료의 **요점 메모**(보고 날짜순, 파일명·날짜·digest). 원문 전체는 보내지 않는다(D9).
 - **출력 JSON**: `{ currentStatus, timeline: TimelineItem[] }`
 - **프롬프트 규칙**: PRD must 2 규칙 전부(3문장/2문장/출처/자료에 없음/변경 전/불일치)
 - **코드 검증**: 문장 수(`.`, `다.` 기준 분리) 초과·출처 누락·출처 파일명이 입력에 없는 경우 → 다시 요청 1회 → 실패 시 오류
 - 저장 직전 `lib/mask.ts` 한 번 더 적용
 
 ### 5.3 공통
-- `AbortSignal.timeout(60_000)`으로 호출당 1분 제한
+- 요청 시작 시 `deadline = Date.now() + 60_000`을 만들고, 각 AI 호출은 `AbortSignal.timeout(deadline - Date.now())`로 남은 시간만큼만 기다린다(D8). 업로드뿐 아니라 반려·삭제·재생성·재분류 액션에도 같은 방식을 쓴다.
 - 모델명은 환경변수 `OPENAI_MODEL`로 두고 기본값은 작업 18에서 정한다.
-- 갱신안 생성은 연결된 이슈(최대 3개)를 `Promise.all`로 병렬 처리해 전체 1분 안에 끝낸다.
+- 갱신안 생성은 연결된 이슈(최대 3개)를 `Promise.all`로 병렬 처리한다.
+- 업로드 route와 액션 파일에 `maxDuration`(70초 이상)을 설정해 배포 환경이 먼저 끊지 않게 한다(작업 29에서 확인).
 
 ## 6. 화면 설계
 
@@ -349,6 +378,8 @@ alter table rejections      enable row level security;
 └───────────────────────────────────────────────────────┘
 ```
 - 확정본이 아직 없는 새 이슈는 현재 현황 자리에 "아직 승인된 정리본이 없습니다"를 보여 주고, 팀장에게는 갱신안을 펼친 상태로 보여 준다.
+- 확정본에 `includesDeleted`가 있으면 현재 현황 위에 "삭제된 자료 내용이 포함되어 있습니다 — 새 갱신안 승인 시 해소" 안내를 보여 준다.
+- `needsRegeneration`이면 "갱신안을 만들지 못했습니다" 안내와 [갱신안 다시 만들기] 버튼을 보여 준다.
 
 ### 6.3 컴포넌트
 
@@ -372,14 +403,16 @@ alter table rejections      enable row level security;
 - [ ] 보고자료 올리기 버튼 (accept: .hwpx,.docx,.pptx,.pdf,.txt)
 - [ ] 업로드 결과 안내 (성공: 연결된 이슈명 / 실패: PRD 문구)
 - [ ] 승인 대기 건수
-- [ ] 이슈 카드: 이름, 현재 현황 첫 문장, 승인 대기 배지, 자료 수
+- [ ] 이슈 카드: 이름, 현재 현황 첫 문장(확정본이 없으면 "승인 대기 중"), 승인 대기 배지, 자료 수
 - [ ] 미분류 목록: 파일명, 사유, 다시 분류 버튼, 삭제 버튼
 - [ ] 이슈가 없을 때 빈 상태 안내
 
 **이슈 정리본 `/issues/[id]`**
 - [ ] 목록으로 돌아가기 링크, 이슈 이름
-- [ ] 승인 대기 안내 + (팀장) 승인 버튼, 반려 사유 입력, 올바른 이슈 이름 입력, 반려 버튼
+- [ ] 승인 대기 안내 + (팀장) 승인 버튼, 반려 사유 입력, 올바른 이슈 이름 입력(20자 이내 검사), 반려 버튼
 - [ ] 현재 현황(확정본), 불일치 표시 강조
+- [ ] "삭제된 자료 포함" 안내 (includesDeleted일 때)
+- [ ] "갱신안을 만들지 못했습니다" 안내 + [갱신안 다시 만들기] 버튼 (needsRegeneration일 때)
 - [ ] 흐름: 날짜(업로드일 표시 포함), 내용, 출처(파일명·날짜), "변경 전" 태그
 - [ ] 연결 자료 목록: 파일명, 보고일, 분류 이유, 삭제 버튼
 - [ ] 없는 이슈 id → `not-found`
@@ -392,9 +425,11 @@ alter table rejections      enable row level security;
 | PDF | `pdfjs-dist`로 페이지별 텍스트 | 비밀번호 예외 → 암호 / 글자 0자 → 이미지 |
 | DOCX | `jszip` → `word/document.xml`의 `w:t` | zip 열기 실패(암호 문서는 zip이 아님) → 암호 / 0자 → 빈 파일 |
 | PPTX | `jszip` → `ppt/slides/slide*.xml`의 `a:t` (슬라이드 번호순) | 위와 같음 |
-| HWPX | `jszip` → `Contents/section*.xml`의 `hp:t` | 위와 같음 |
+| HWPX | `jszip` → `Contents/section*.xml`의 `hp:t` | zip 열기 실패 → 암호 / `META-INF/manifest.xml`에 암호화 정보가 있으면 → 암호(**빈 파일 판정보다 먼저**) / 0자 → 빈 파일 |
 
 - 반환형: `{ ok: true, text } | { ok: false, reason: "암호" | "이미지" | "빈 파일" }`
+- HWPX 암호 판정 방식은 작업 14에서 암호 건 샘플 파일로 실제 구조를 확인한 뒤 확정한다.
+- **위험(작업 13)**: `pdfjs-dist`는 브라우저에서 별도 worker 파일 설정이 필요하다. Turbopack 환경에서 worker 경로를 먼저 확인하고, 안 되면 worker 없이 동작하는 설정을 쓴다. 추출 모듈은 업로드할 때만 `import()`로 불러와 첫 화면을 무겁게 하지 않는다.
 - 추출 후 `lib/mask.ts` 적용 → 해시는 **원본 바이트**로 계산(같은 파일 판정용)
 
 ### 개인정보 가리기 (`lib/mask.ts`, 브라우저·서버 공용)
@@ -446,6 +481,10 @@ alter table rejections      enable row level security;
 | 5 | 암호 PDF / 스캔 PDF / 빈 TXT 업로드 | 사유별 안내 문구 |
 | 6 | 자료 삭제 | 연결 이슈들의 갱신안 재생성 |
 | 7 | 날짜가 같은데 내용이 다른 자료 2건 | 현황에 "자료 간 내용 불일치 — 확인 필요" |
+| 8 | 확정본에 포함된 자료 삭제 → 생긴 갱신안 반려 | 확정본 유지 + "삭제된 자료 포함" 안내, 재분류 없음 |
+| 9 | 새 이슈의 갱신안을 이름 없이 반려 | 자료는 미분류로, 빈 이슈는 목록에서 사라짐 |
+| 10 | 반려 시 21자 이슈 이름 입력 | 반려되지 않고 20자 이내 안내 |
+| 11 | 자료 10건 이상인 이슈에 업로드 | 갱신안이 1분 이내 생성 (요점 메모 사용) |
 
 ### 10.3 샘플 자료
 `samples/` 폴더(민감 정보 없음)에 형식별 1개 이상 + 예외 파일(암호 PDF, 이미지 PDF, 빈 TXT) + 성공 기준 측정용 20건을 둔다. 실제 업무 자료는 넣지 않는다.
@@ -501,6 +540,12 @@ PLAN.md 작업 순서(1~32)를 그대로 따른다. 이 문서의 각 절과의 
 
 권장: 모듈 하나를 한 세션에서 끝내고 커밋한 뒤 다음 모듈로 넘어간다.
 
+## 알려진 한계
+
+- **동시 업로드 경쟁**: 같은 이슈에 자료 두 건이 거의 동시에 처리되면, 먼저 시작한 갱신안 생성이 나중에 끝나 다른 쪽 결과를 덮어쓸 수 있다. 팀 규모에서는 드물어 이번 사이클에서는 막지 않는다. 생기면 [갱신안 다시 만들기]로 해소한다(저장 시 `document_ids`가 현재 연결과 다르면 `needs_regeneration = true`로 표시해 알아챌 수 있게 한다).
+- **로그인 없음**: 역할 쿠키는 표시 구분일 뿐 보안 장치가 아니다(PRD 비범위).
+- **암호 판정 오차**: 손상된 파일이나 확장자만 바꾼 구형 파일도 "암호"로 안내될 수 있다.
+
 ## 남은 확인 사항
 - 작업 18: OpenAI 기본 모델, API 데이터 학습 미사용 정책 확인
 - 작업 29: Vercel 함수 최대 실행 시간이 1분 처리에 충분한지(`maxDuration` 설정 필요 여부)
@@ -511,3 +556,4 @@ PLAN.md 작업 순서(1~32)를 그대로 따른다. 이 문서의 각 절과의 
 | Version | Date | Changes |
 |---|---|---|
 | 0.1 | 2026-10-28 | 초안 (설계안 C, 브라우저 글 추출 확정) |
+| 0.2 | 2026-10-28 | 검토 반영: 60초 단일 마감(D8), 요점 메모(D9), 삭제 후 확정본 표시(D10), 빈 이슈 삭제(D11), 재생성 실패 처리, 반려 이름 검사, 카드 표시, 알려진 한계, pdfjs·HWPX 위험 |
