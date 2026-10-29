@@ -161,7 +161,7 @@ async function HeatmapView({ searchParams }: { searchParams: SearchParams }) {
 export default function Home({ searchParams }: PageProps<"/">) {
   return (
     <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-6 px-4 py-8 sm:px-6">
-      <h1 className="text-2xl font-semibold">온비드 압류재산 매각현황 히트맵</h1>
+      <h1 className="text-2xl font-semibold">압류재산 공매 지역별 유찰현황</h1>
       <Suspense fallback={<p className="text-zinc-500">불러오는 중…</p>}>
         <HeatmapView searchParams={searchParams} />
       </Suspense>

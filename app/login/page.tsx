@@ -15,7 +15,7 @@ export default function LoginPage({ searchParams }: PageProps<"/login">) {
   return (
     <main className="flex flex-1 items-center justify-center px-4 py-16">
       <div className="flex w-full max-w-sm flex-col gap-6 rounded-lg border border-zinc-200 p-6 dark:border-zinc-800">
-        <h1 className="text-lg font-semibold">온비드 압류재산 매각현황</h1>
+        <h1 className="text-lg font-semibold">압류재산 공매 지역별 유찰현황</h1>
         <Suspense fallback={null}>
           <Form searchParams={searchParams} />
         </Suspense>
