@@ -10,7 +10,7 @@ import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { LOCK_COOKIE, LOCK_MAX_AGE_SECONDS, checkPassword, isUnlocked, issueLockToken, safeNext } from "@/lib/auth";
 import { retryFailedWeek } from "@/lib/collect";
-import { clearLoginFailures, loginGate, recordLoginFailure } from "@/lib/db/login-attempts";
+import { clearLoginFailures, reserveLoginAttempt } from "@/lib/db/login-attempts";
 
 export type LoginState = { message: string } | null;
 
@@ -26,13 +26,13 @@ export async function login(_prev: LoginState, formData: FormData): Promise<Logi
   const next = safeNext(String(formData.get("next") ?? "/"));
   const ip = await clientIp();
   try {
-    const gate = await loginGate(ip);
-    if (gate.locked) return { message: `${minutesText(gate.minutesLeft)} 뒤에 다시 시도해 주세요.` };
+    // 비밀번호를 검사하기 전에 시도를 먼저 예약한다 (동시 요청으로 5번 제한을 넘지 못하게)
+    const attempt = await reserveLoginAttempt(ip);
+    if (attempt.locked) return { message: `${minutesText(attempt.minutesLeft)} 뒤에 다시 시도해 주세요.` };
     if (!checkPassword(password)) {
-      const result = await recordLoginFailure(ip);
-      return result.locked
+      return attempt.remaining === 0
         ? { message: "10분 뒤에 다시 시도해 주세요." }
-        : { message: `비밀번호가 맞지 않습니다. (남은 기회 ${result.remaining}번)` };
+        : { message: `비밀번호가 맞지 않습니다. (남은 기회 ${attempt.remaining}번)` };
     }
     await clearLoginFailures(ip);
   } catch {
