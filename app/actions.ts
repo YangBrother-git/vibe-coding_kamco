@@ -56,7 +56,7 @@ export type RetryStepState =
   | { status: "staged"; office: string; staged: number; total: number }
   | { status: "saved"; items: number }
   | { status: "failed"; office: string; message: string }
-  | { status: "refused" | "skipped" | "error"; message: string };
+  | { status: "busy" | "refused" | "skipped" | "error"; message: string };
 
 export async function retryCollect(): Promise<RetryStepState> {
   if (!isUnlocked((await cookies()).get(LOCK_COOKIE)?.value)) {
@@ -75,8 +75,11 @@ export async function retryCollect(): Promise<RetryStepState> {
       case "skipped":
         refresh();
         return { status: "skipped", message: "이미 수집에 성공한 주입니다" };
+      case "busy":
+        return { status: "busy", message: "예약 실행이 수집 중입니다. 잠시 뒤 이어서 받습니다." };
       case "refused":
-        return { status: "refused", message: result.message };
+      case "marked-failed":
+        return { status: "refused", message: "message" in result ? result.message : "다시 가져올 실패한 주가 없습니다" };
     }
   } catch {
     return { status: "error", message: "저장소에 닿지 못했습니다. 잠시 뒤 다시 눌러 주세요." };

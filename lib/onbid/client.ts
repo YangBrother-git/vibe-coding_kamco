@@ -30,11 +30,13 @@ const PAGE_SIZE = 100;
 const MAX_PAGES = 200; // 응답이 이상해 끝없이 넘기는 일을 막는 안전장치
 const REQUEST_GAP_MS = 3000; // 요청 간격 최소 3초 (PRD 5장)
 const OPEN_STATUSES = new Set(["입찰준비중", "입찰진행중"]);
+// 요청 하나가 이 시간 안에 끝나지 않으면 끊고 실패로 본다 (평소 1~2초). 응답이 없어 서버가 강제 종료되는 일을 막는다
+const REQUEST_TIMEOUT_MS = 20_000;
 
 /** 수집 실패 이유 */
 export type CollectFailure =
   | "office" // 모르는 지역본부 코드
-  | "http" // 응답 자체가 실패 (접속 오류·차단 포함)
+  | "http" // 응답 자체가 실패 (접속 오류·차단·시간 초과 포함)
   | "format"; // 응답 모양을 읽을 수 없음 (사이트 구조 변경, 대기열 화면 등)
 
 export type OfficeCollectResult =
@@ -116,6 +118,7 @@ async function fetchPage(
     },
     body: new URLSearchParams(form),
     cache: "no-store",
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
   if (!res.ok) throw new CollectError("http", `HTTP ${res.status}`);
   const text = await res.text();
@@ -227,7 +230,10 @@ export async function collectOffice(officeCode: string, options: Options = {}): 
       ok: false,
       office: office.name,
       reason: "http",
-      message: `요청 실패: ${error instanceof Error ? error.message : "알 수 없음"}`,
+      message:
+        error instanceof Error && error.name === "TimeoutError"
+          ? `요청 시간 초과 (${REQUEST_TIMEOUT_MS / 1000}초)`
+          : `요청 실패: ${error instanceof Error ? error.message : "알 수 없음"}`,
     };
   }
 }

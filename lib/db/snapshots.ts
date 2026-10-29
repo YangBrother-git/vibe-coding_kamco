@@ -99,6 +99,23 @@ export async function recordFailure(week: FiscalWeek, status: "retrying" | "fail
   if (error) throw new Error(`실패 기록 실패: ${error.message}`);
 }
 
+/**
+ * 수집 잠금 얻기 (한 번에 한 수집만 돌게 — 예약 실행과 다시 가져오기 버튼이 겹치지 않게).
+ * 잠금은 seconds초 뒤 저절로 풀린다(실행이 강제로 끊겨도 영원히 잠기지 않게).
+ * @returns 얻었으면 true, 다른 수집이 돌고 있으면 false
+ */
+export async function acquireCollectLock(holder: string, seconds: number): Promise<boolean> {
+  const { data, error } = await db().rpc("acquire_collect_lock", { p_holder: holder, p_seconds: seconds });
+  if (error) throw new Error(`수집 잠금 얻기 실패: ${error.message}`);
+  return data === true;
+}
+
+/** 수집 잠금 풀기 (내가 얻은 잠금만) */
+export async function releaseCollectLock(holder: string): Promise<void> {
+  const { error } = await db().rpc("release_collect_lock", { p_holder: holder });
+  if (error) throw new Error(`수집 잠금 풀기 실패: ${error.message}`);
+}
+
 /** 그날 그 주에 이미 임시 보관된 지역본부 이름들 */
 export async function stagedOffices(week: FiscalWeek, collectedOn: DateString): Promise<string[]> {
   const { data, error } = await db()
