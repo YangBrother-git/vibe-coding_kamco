@@ -17,6 +17,9 @@ import { getItems, listSnapshots } from "@/lib/db/snapshots";
 import type { AuctionItem, WeeklySnapshot } from "@/lib/types";
 import { currentFiscalWeek, fiscalWeekFromNumber } from "@/lib/week";
 
+// "지금 다시 가져오기" 서버 동작은 지역본부 1곳에 17~35초 걸린다 (2026-10-29 측정). 여유 있게 2분까지 허용
+export const maxDuration = 120;
+
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 type View = { fiscalYear: number; region: string; week: number | null };
 

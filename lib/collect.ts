@@ -10,13 +10,15 @@ import "server-only";
 import { REGION_OFFICES } from "./known-values";
 import { collectOffice } from "./onbid/client";
 import { finalizeWeek, listSnapshots, recordFailure, stageOffice, stagedOffices } from "./db/snapshots";
-import { currentFiscalWeek, kstWeekday, toKstDate, type FiscalWeek } from "./week";
+import { failedWeekToShow } from "./collect-status";
+import { currentFiscalWeek, fiscalWeekFromNumber, kstWeekday, toKstDate, type FiscalWeek } from "./week";
 
 export type CollectStepResult =
   | { status: "skipped"; reason: "already-success"; week: FiscalWeek }
   | { status: "staged"; week: FiscalWeek; office: string; items: number; staged: number; total: number }
   | { status: "saved"; week: FiscalWeek; office: string; items: number }
-  | { status: "failed"; week: FiscalWeek; office: string; reason: string; message: string };
+  | { status: "failed"; week: FiscalWeek; office: string; reason: string; message: string }
+  | { status: "refused"; message: string };
 
 /**
  * 수집 한 걸음.
@@ -52,4 +54,15 @@ export async function runCollectStep(now: Date = new Date(), target?: FiscalWeek
   }
   const items = await finalizeWeek(week, today);
   return { status: "saved", week, office: result.office, items };
+}
+
+/**
+ * "지금 다시 가져오기" 버튼의 한 걸음 (PLAN 작업 21 / DESIGN 3.3).
+ * 이번 주가 금요일까지 모두 실패한 경우에만, 그 주 일요일까지, 실패한 그 주로 저장한다.
+ * 한 번 부르면 지역본부 1곳을 받는다. 화면은 12곳이 모일 때까지 되풀이해 부른다.
+ */
+export async function retryFailedWeek(now: Date = new Date()): Promise<CollectStepResult> {
+  const failed = failedWeekToShow(await listSnapshots(), now);
+  if (!failed) return { status: "refused", message: "다시 가져올 실패한 주가 없습니다" };
+  return runCollectStep(now, fiscalWeekFromNumber(failed.fiscalYear, failed.weekNo));
 }
