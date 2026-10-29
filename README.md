@@ -1,36 +1,51 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# 압류재산 공매 지역별 유찰현황
 
-## Getting Started
+온비드(www.onbid.co.kr)의 **압류재산 매각물건**을 매주 월요일 자동으로 모아, **지역본부별 용도 × 유찰 횟수 히트맵**으로 보여 주는 개인용 웹 앱입니다. 어느 지역에서 유찰이 심한지 한눈에 보고, 회계연도 동안의 주간 추이를 슬라이더로 돌려 볼 수 있습니다.
 
-First, run the development server:
+> 자료 출처: 온비드(www.onbid.co.kr) 압류재산 물건 목록 · 공공누리 제1유형(출처표시). 영리 목적으로 재이용하지 않는 개인 업무 참고용입니다.
+
+## 왜 만들었나
+
+온비드는 물건을 목록과 상세 페이지로만 보여 줘서, 지역본부별로 어떤 용도의 물건이 몇 번 유찰됐는지 한눈에 보기 어렵고 주마다 어떻게 바뀌는지도 비교할 수 없습니다. 이 앱은 그 현황을 자동으로 모으고 기록해 줍니다.
+
+## 주요 기능
+
+- **지역별 유찰 히트맵**: 용도(대분류) × 유찰 횟수(0·1·2·3·4·5회 이상) 표에 건수를 숫자와 고정 5단계 색으로 표시
+- **지역 선택 메뉴**: 전국 합계와 12개 지역본부, 지역마다 유찰 1회 이상 건수·비율 표시(건수 많은 순)
+- **주차 슬라이더·회계연도 선택**: 월~일 기준 주 단위(1월 1일이 든 주가 1주차)로 추이를 보고 지난 회계연도도 확인
+- **매주 월요일 자동 수집**: Supabase Cron이 한국 시간 월~금 오전 9~11시에 지역본부 1곳씩 받아 12곳이 모이면 그 주 기록으로 저장, 실패하면 다시 시도
+- **수집 실패 안내**: 금요일까지 실패하면 "지금 다시 가져오기" 버튼 표시
+- **비밀번호 잠금**: 비밀번호 하나, 30일 기억, 같은 IP 5번 연속 실패 시 10분 차단, 모든 페이지 검색엔진 노출 차단
+- (추가) 슬라이더 재생 버튼, 히트맵 칸을 눌러 물건 목록 보기
+
+## 기술 스택
+
+Next.js 16 (App Router) · React 19 · TypeScript · Tailwind CSS v4 · Supabase(Postgres, Cron) · Vercel
+
+## 문서
+
+- [PRD.md](PRD.md) — 기획서(문제 정의, 목표, 기능 규칙, 범위, 보안)
+- [PLAN.md](PLAN.md) — 작업 계획서와 성공 기준 점검 기록
+- [DESIGN.md](DESIGN.md) — 설계서
+
+## 실행 방법
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+http://localhost:3000 에서 확인합니다. 실제로 쓰려면 프로젝트 루트에 `.env` 파일을 만들고 아래 값을 직접 넣어야 합니다. `.env`는 저장소에 올라가지 않습니다.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+| 이름 | 용도 |
+|---|---|
+| `APP_PASSWORD` | 접근 비밀번호 |
+| `CRON_SECRET` | 예약 실행이 수집 경로를 부를 때 쓰는 비밀값 |
+| `SUPABASE_URL` | Supabase 프로젝트 주소 |
+| `SUPABASE_SECRET_KEY` | Supabase 서버용 키(서버 코드에서만 사용) |
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+표 구조와 예약 실행 설정은 `supabase/migrations/`의 SQL 파일에 있습니다.
 
-## Learn More
+## 보안
 
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+비밀 값은 `.env`와 Vercel 환경 변수에만 두며 저장소에 올리지 않습니다. 앱은 개인정보를 저장하지 않고, 물건번호·지역본부·용도(대분류)·유찰 횟수·수집일 5가지만 저장합니다.
