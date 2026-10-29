@@ -16,5 +16,6 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!api/collect|login|_next/static|_next/image|favicon.ico|robots.txt).*)"],
+  // 예외 경로는 경계까지 정확히 맞아야 한다 (/loginX 같은 비슷한 이름은 잠금 검사를 받는다)
+  matcher: ["/((?!api/collect(?:/|$)|login(?:/|$)|_next/static/|_next/image(?:/|$)|favicon\\.ico$|robots\\.txt$).*)"],
 };

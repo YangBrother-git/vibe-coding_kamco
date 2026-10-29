@@ -3,6 +3,8 @@
 // 화면 상태는 주소에 담는다: ?fy=회계연도&region=지역본부&week=주차
 // (없으면 올해 · 전국 합계 · 그 회계연도의 가장 최근 성공 주)
 
+import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
 import { connection } from "next/server";
 import { Suspense } from "react";
 import { FiscalYearSelect } from "@/components/fiscal-year-select";
@@ -13,6 +15,7 @@ import { CollectFailedBanner } from "@/components/collect-failed-banner";
 import { RegionList } from "@/components/region-list";
 import { WeekSlider } from "@/components/week-slider";
 import { NATIONAL, buildHeatmap, itemsInCell, summarizeRegions } from "@/lib/aggregate";
+import { LOCK_COOKIE, isUnlocked } from "@/lib/auth";
 import { failedWeekToShow, formatKstDateTime, latestSuccess } from "@/lib/collect-status";
 import { getItems, listSnapshots } from "@/lib/db/snapshots";
 import { FAIL_BUCKETS, type AuctionItem, type FailBucket, type WeeklySnapshot } from "@/lib/types";
@@ -50,6 +53,8 @@ async function HeatmapView({ searchParams }: { searchParams: SearchParams }) {
   const params = await searchParams;
   // "올해"는 요청이 들어온 시각으로 정해야 하므로, 미리 그리기를 여기서 멈춘다
   await connection();
+  // proxy.ts만 믿지 않고 여기서도 잠금을 다시 확인한다 (예외 경로 규칙이 바뀌어도 데이터가 새지 않게)
+  if (!isUnlocked((await cookies()).get(LOCK_COOKIE)?.value)) redirect("/login");
   const now = new Date();
   const currentYear = currentFiscalWeek(now).fiscalYear;
 

@@ -54,6 +54,8 @@ export function isUnlocked(token: string | undefined, now: Date = new Date()): b
 
 /** 로그인 뒤 돌아갈 주소. 우리 사이트 안의 주소만 허용 (다른 사이트로 보내는 것 방지) */
 export function safeNext(next: string | null | undefined): string {
-  if (!next || !next.startsWith("/") || next.startsWith("//") || next.startsWith("/\\")) return "/";
+  if (!next || !next.startsWith("/") || next.startsWith("//")) return "/";
+  // 탭·줄바꿈 같은 제어문자와 역슬래시는 주소 해석 때 지워지거나 /로 바뀌어 "//다른사이트"가 될 수 있다
+  if (/[\x00-\x1f\x7f\\]/.test(next)) return "/";
   return next;
 }
