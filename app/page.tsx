@@ -151,7 +151,12 @@ async function HeatmapView({ searchParams }: { searchParams: SearchParams }) {
           </h2>
           <HeatmapTable table={buildHeatmap(items, region)} />
           <HeatmapLegend />
-          <WeekSlider key={`${fiscalYear}-${week}`} weeks={weekOptions} selected={week} />
+          <WeekSlider
+            key={`${fiscalYear}-${week}`}
+            weeks={weekOptions}
+            selected={week}
+            playing={params.play === "1"}
+          />
         </section>
       </div>
     </div>
