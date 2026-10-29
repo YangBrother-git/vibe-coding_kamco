@@ -92,6 +92,27 @@ export function buildHeatmap(items: readonly AuctionItem[], region: string = NAT
   };
 }
 
+/**
+ * 히트맵 칸 하나에 들어간 물건들 (PLAN 작업 32, nice: 칸을 누르면 물건 목록).
+ * buildHeatmap과 같은 규칙("기타"·5회 이상 묶음)으로 고르므로, 목록 건수는 칸의 숫자와 같다.
+ * 유찰 횟수가 많은 순, 같으면 물건번호 순.
+ */
+export function itemsInCell(
+  items: readonly AuctionItem[],
+  region: string,
+  category: string,
+  bucket: FailBucket,
+): AuctionItem[] {
+  return items
+    .filter(
+      (item) =>
+        (region === NATIONAL || normalizeRegion(item.regionOffice) === region) &&
+        normalizeCategory(item.category) === category &&
+        toFailBucket(item.failCount) === bucket,
+    )
+    .sort((a, b) => b.failCount - a.failCount || a.itemNo.localeCompare(b.itemNo));
+}
+
 function summarize(region: string, items: readonly AuctionItem[]): RegionSummary {
   const failedCount = items.filter((item) => toFailBucket(item.failCount) >= 1).length;
   return {

@@ -8,13 +8,14 @@ import { Suspense } from "react";
 import { FiscalYearSelect } from "@/components/fiscal-year-select";
 import { HeatmapLegend } from "@/components/heatmap-legend";
 import { HeatmapTable } from "@/components/heatmap-table";
+import { ItemList } from "@/components/item-list";
 import { CollectFailedBanner } from "@/components/collect-failed-banner";
 import { RegionList } from "@/components/region-list";
 import { WeekSlider } from "@/components/week-slider";
-import { NATIONAL, buildHeatmap, summarizeRegions } from "@/lib/aggregate";
+import { NATIONAL, buildHeatmap, itemsInCell, summarizeRegions } from "@/lib/aggregate";
 import { failedWeekToShow, formatKstDateTime, latestSuccess } from "@/lib/collect-status";
 import { getItems, listSnapshots } from "@/lib/db/snapshots";
-import type { AuctionItem, WeeklySnapshot } from "@/lib/types";
+import { FAIL_BUCKETS, type AuctionItem, type FailBucket, type WeeklySnapshot } from "@/lib/types";
 import { currentFiscalWeek, fiscalWeekFromNumber } from "@/lib/week";
 
 // "지금 다시 가져오기" 서버 동작은 지역본부 1곳에 17~35초 걸린다 (2026-10-29 측정). 여유 있게 2분까지 허용
@@ -134,6 +135,24 @@ async function HeatmapView({ searchParams }: { searchParams: SearchParams }) {
   const region = summaries.some((s) => s.region === requestedRegion) ? requestedRegion : NATIONAL;
 
   const regions = summaries.map((s) => ({ ...s, href: viewHref({ fiscalYear, region: s.region, week }) }));
+
+  // 칸을 누르면 그 칸의 물건 목록을 연다 (?cat=용도&f=유찰칸). 같은 칸을 다시 누르면 닫힌다 (PLAN 작업 32)
+  const table = buildHeatmap(items, region);
+  const requestedBucket = Number(params.f);
+  const cell =
+    typeof params.cat === "string" &&
+    table.rows.some((row) => row.category === params.cat) &&
+    (FAIL_BUCKETS as readonly number[]).includes(requestedBucket)
+      ? { category: params.cat, bucket: requestedBucket as FailBucket }
+      : null;
+  const cellHref = (category: string, bucket: FailBucket) => {
+    const base = viewHref({ fiscalYear, region, week });
+    if (cell?.category === category && cell.bucket === bucket) return base;
+    const query = new URLSearchParams(base.split("?")[1] ?? "");
+    query.set("cat", category);
+    query.set("f", String(bucket));
+    return `/?${query}`;
+  };
   const weekOptions = weeks.map((s) => ({
     weekNo: s.weekNo,
     label: weekLabel(fiscalYear, s.weekNo),
@@ -149,7 +168,14 @@ async function HeatmapView({ searchParams }: { searchParams: SearchParams }) {
           <h2 className="text-lg font-medium">
             {region} · {fiscalYear}년 <span className="text-zinc-500">{weekLabel(fiscalYear, week)}</span>
           </h2>
-          <HeatmapTable table={buildHeatmap(items, region)} />
+          <HeatmapTable table={table} cellHref={cellHref} selected={cell} />
+          {cell ? (
+            <ItemList
+              title={`${region} · ${cell.category} · 유찰 ${cell.bucket === 5 ? "5회 이상" : `${cell.bucket}회`}`}
+              items={itemsInCell(items, region, cell.category, cell.bucket)}
+              closeHref={viewHref({ fiscalYear, region, week })}
+            />
+          ) : null}
           <HeatmapLegend />
           <WeekSlider
             key={`${fiscalYear}-${week}`}
